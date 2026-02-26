@@ -59,7 +59,22 @@ impl SqlDirectory {
                                     .await
                                     .caused_by(trc::location!())?,
                             )
-                            .caused_by(trc::location!())?,
+                            .caused_by(trc::location!())?
+                            // FIX: row_to_principal() never sets principal.name because
+                            // SqlMappings has no column_name field.  QueryBy::Name and
+                            // QueryBy::Credentials both set p.name explicitly after
+                            // row_to_principal(), but QueryBy::Id was missing this step.
+                            // Without it, query_emails runs with name="" returning 0 rows,
+                            // which causes update_external() to desync the internal store
+                            // (removing the PrimaryEmail and preventing Identity/set from
+                            // finding any configured email addresses).
+                            // We propagate the stored principal's name to the external
+                            // principal so query_emails receives the correct lookup value.
+                            // See: https://github.com/stalwartlabs/stalwart/issues/2486
+                            .map(|mut p| {
+                                p.name = principal.name().into();
+                                p
+                            }),
                         Some(principal),
                     )
                 } else {
