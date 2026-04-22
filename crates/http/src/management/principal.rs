@@ -647,6 +647,24 @@ impl PrincipalManager for Server {
                             }
                         }
 
+                        // Synchronize the principal from the configured directory before mutating
+                        // e-mail fields so external-directory primary addresses are hydrated first.
+                        //
+                        // Without this sync, accounts that are lazily created in the internal
+                        // store can briefly have no primary e-mail; then an `addItem emails`
+                        // operation may incorrectly promote an alias to primary, which later
+                        // breaks Identity/set validation for that alias.
+                        if matches!(typ, Type::Individual)
+                            && changes
+                                .iter()
+                                .any(|change| matches!(change.field, PrincipalField::Emails))
+                        {
+                            let _ = self
+                                .directory()
+                                .query(QueryParams::id(account_id).with_return_member_of(false))
+                                .await?;
+                        }
+
                         // Update principal
                         let changed_principals = self
                             .core

@@ -90,10 +90,15 @@ impl HttpStoreGet for Arc<HttpStore> {
 impl HttpStore {
     async fn try_refresh(&self) -> trc::Result<AHashMap<String, Value<'static>>> {
         let time = Instant::now();
-        let agent = BROWSER_USER_AGENTS.choose(&mut rand::rng()).unwrap();
+        // Use the configured User-Agent if provided, otherwise fallback to a randomized browser agent.
+        // Providers like PhishTank enforce strict user-agent rules and will return 403 for generic agents,
+        // so allowing a configurable override is necessary for successful lookups.
+        let agent: &str = self.config.user_agent.as_deref().unwrap_or_else(|| {
+            BROWSER_USER_AGENTS.choose(&mut rand::rng()).unwrap()
+        });
         let response = reqwest::Client::builder()
             .timeout(self.config.timeout)
-            .user_agent(*agent)
+            .user_agent(agent)
             .build()
             .unwrap_or_default()
             .get(&self.config.url)

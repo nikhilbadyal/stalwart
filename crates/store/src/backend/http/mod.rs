@@ -29,6 +29,9 @@ pub struct HttpStoreConfig {
     pub max_entries: usize,
     pub max_entry_size: usize,
     pub format: HttpStoreFormat,
+    // PhishTank now blocks generic browser user-agents and requires a descriptive one (e.g. phishtank/[username]).
+    // We add user_agent to allow configuring a non-generic agent to prevent 403 Forbidden errors when fetching datasets.
+    pub user_agent: Option<String>,
 }
 
 #[derive(Debug, Clone)]

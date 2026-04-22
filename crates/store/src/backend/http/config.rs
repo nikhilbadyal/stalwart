@@ -86,6 +86,9 @@ impl Stores {
                     .property_or_default::<usize>(("http-lookup", id_, "limits.entry-size"), "512")
                     .unwrap_or(512),
                 format,
+                // Allow users to override the User-Agent header via configuration.
+                // This is specifically needed for services like PhishTank that block generic browser agents.
+                user_agent: config.value(("http-lookup", id_, "user-agent")).map(|s| s.to_string()),
                 id,
             };
 
