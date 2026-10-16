@@ -1,0 +1,77 @@
+# This workflow publishes the Stalwart image to GHCR for every push.
+name: Publish GHCR Latest
+
+# This trigger runs publishing automatically whenever code is pushed.
+on:
+  push:
+
+  # This trigger allows manual republish for recovery or debugging.
+  workflow_dispatch:
+
+# This concurrency rule prevents competing runs from racing on the same tag.
+concurrency:
+  # This group key scopes cancellation by workflow name and git ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # This flag keeps only the most recent run active for a given ref.
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    # This runner provides a consistent Linux build environment for Docker Buildx.
+    runs-on: namespace-profile-stalwart
+    permissions:
+      # This permission is required to read repository files for build context.
+      contents: read
+      # This permission is required to push container packages to GHCR.
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        # This action checks out the source code used for Docker image build.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Prepare image metadata
+        # This step computes stable image names and traceable tags.
+        run: |
+          # This line lowercases the owner because GHCR image paths are lowercase.
+          owner_lower="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          # This line stores the final GHCR image repository path.
+          echo "IMAGE_NAME=ghcr.io/${owner_lower}/stalwart" >> "${GITHUB_ENV}"
+          # This line stores an immutable commit tag for rollback/debug support.
+          echo "IMAGE_TAG_SHA=sha-${GITHUB_SHA}" >> "${GITHUB_ENV}"
+
+      - name: Set up QEMU
+        # This action enables cross-platform runtime stage execution for arm64 builds.
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        # This action enables multi-platform image building and pushing.
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Authenticate Docker to GHCR
+        # This step logs in to GHCR using the repository workflow token.
+        run: |
+          # This command performs non-interactive auth for build-push usage.
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push Stalwart image
+        # This action builds Stalwart and publishes only GHCR tags.
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          # This context points to the Stalwart repository root.
+          context: .
+          # This Dockerfile is the runtime-oriented image build definition.
+          file: Dockerfile
+          # This enables publishing to registry instead of local-only output.
+          push: true
+          # This platform set publishes common server architectures.
+          platforms: linux/amd64,linux/arm64
+          # This tag list always updates latest and also emits immutable SHA tag.
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG_SHA }}
+          # This cache source accelerates future rebuilds in GitHub Actions.
+          cache-from: type=gha,scope=publish-ghcr-latest
+          # This cache target persists layers for faster repeated builds.
+          cache-to: type=gha,mode=max,scope=publish-ghcr-latest,ignore-error=true
+
