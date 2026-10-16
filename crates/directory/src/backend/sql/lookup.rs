@@ -48,20 +48,30 @@ impl SqlDirectory {
                     .await
                     .caused_by(trc::location!())?
                 {
-                    (
-                        self.mappings
-                            .row_to_principal(
-                                self.sql_store
-                                    .sql_query::<NamedRows>(
-                                        &self.mappings.query_name,
-                                        vec![principal.name().into()],
-                                    )
-                                    .await
-                                    .caused_by(trc::location!())?,
-                            )
-                            .caused_by(trc::location!())?,
-                        Some(principal),
-                    )
+                    // Keep a stable lookup key from the internal principal because SQL lookups for
+                    // secondary attributes (such as query_emails/query_members) need the account name.
+                    let principal_name = principal.name().to_string();
+                    // Resolve the external SQL principal using the stable internal principal name.
+                    let mut external_principal = self
+                        .mappings
+                        .row_to_principal(
+                            self.sql_store
+                                .sql_query::<NamedRows>(
+                                    &self.mappings.query_name,
+                                    vec![principal_name.as_str().into()],
+                                )
+                                .await
+                                .caused_by(trc::location!())?,
+                        )
+                        .caused_by(trc::location!())?;
+                    // Ensure the external principal carries the lookup name when present so
+                    // follow-up SQL queries (members/emails) always use the correct key.
+                    if let Some(external_principal) = external_principal.as_mut() {
+                        // Copy the stable principal name to avoid empty/default names in QueryBy::Id.
+                        external_principal.name = principal_name.into();
+                    }
+                    // Return both the SQL principal projection and the internal principal snapshot.
+                    (external_principal, Some(principal))
                 } else {
                     return Ok(None);
                 }
