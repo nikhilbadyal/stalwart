@@ -71,6 +71,16 @@ pub mod mail;
 pub mod principal;
 pub mod server;
 
+// The aggregate suite also runs these cases, but this explicit entry point
+// allows submission regressions to run without unrelated mailbox/index workloads.
+// Run it alone because the test server uses the same fixed listeners as jmap_tests.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Run alone with --ignored; shares JMAP test listeners"]
+async fn jmap_submission_tests() {
+    let mut params = init_jmap_tests(true).await;
+    mail::submission::test(&mut params).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn jmap_tests() {
     let delete = std::env::var("NO_DELETE").is_err();

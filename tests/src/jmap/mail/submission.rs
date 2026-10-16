@@ -418,6 +418,63 @@ pub async fn test(params: &mut JMAPTest) {
     );
 
     // Verify onSuccessUpdateEmail action
+    // Existing submission hooks must use the associated Email ID, and a failed
+    // cancellation must not inherit a neighboring successful operation's hooks.
+    let response = account
+        .jmap_method_call(
+            "EmailSubmission/set",
+            serde_json::json!({
+                "accountId": account.id_string(),
+                "update": { (email_submission_id.clone()): { "undoStatus": "canceled" } },
+                "onSuccessUpdateEmail": {
+                    (email_submission_id.clone()): { "keywords/$flagged": true }
+                }
+            }),
+        )
+        .await;
+    assert!(
+        response.0["methodResponses"][1][1]["updated"]
+            .as_object()
+            .unwrap()
+            .contains_key(&email_id)
+    );
+    assert_email_properties(client, &email_id, &[&mailbox_id], &["$flagged"]).await;
+    let missing_submission_id = Id::from(1_000_000u32).to_string();
+    let response = account
+        .jmap_method_call(
+            "EmailSubmission/set",
+            serde_json::json!({
+                "accountId": account.id_string(),
+                "update": { (missing_submission_id.clone()): { "undoStatus": "canceled" } },
+                // Destroying another submission makes has_changes true while
+                // the nonexistent submission's update fails.
+                "destroy": [email_submission_id.clone()],
+                "onSuccessUpdateEmail": {
+                    (missing_submission_id.clone()): { "keywords/$flagged": null }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        response.0["methodResponses"][0][1]["notUpdated"][&missing_submission_id]["type"],
+        "notFound"
+    );
+    // A failed hook must be filtered before Email/set, rather than attempted
+    // with a submission ID and exposed as an Email notFound error.
+    assert!(response.0["methodResponses"][1][1]["notUpdated"].is_null());
+    assert_email_properties(client, &email_id, &[&mailbox_id], &["$flagged"]).await;
+    // Restore the original fixture so the following creation-reference tests
+    // continue to verify their original mailbox and keyword transitions.
+    account
+        .jmap_method_call(
+            "Email/set",
+            serde_json::json!({
+                "accountId": account.id_string(),
+                "update": { (email_id.clone()): { "keywords/$flagged": null } }
+            }),
+        )
+        .await;
+
     let mut request = client.build();
     let set_request = request.set_email_submission();
     let create_id = set_request
@@ -451,6 +508,53 @@ pub async fn test(params: &mut JMAPTest) {
     assert!(
         client
             .email_get(&email_id, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Existing-ID destroy hooks must also resolve the true Email after the
+    // submission record is removed; keep the queue stopped before retiring it.
+    let cleanup_email_id = client
+        .email_import(
+            email_body.as_bytes().to_vec(),
+            [&mailbox_id],
+            None::<Vec<&str>>,
+            None,
+        )
+        .await
+        .unwrap()
+        .take_id();
+    let cleanup_submission_id = client
+        .email_submission_create_envelope(
+            &cleanup_email_id,
+            &identity_id,
+            Address::new("jdoe@example.com").parameter("HOLDFOR", Some("600")),
+            ["jane_smith@remote.org"],
+        )
+        .await
+        .unwrap()
+        .take_id();
+    client
+        .email_submission_change_status(&cleanup_submission_id, UndoStatus::Canceled)
+        .await
+        .unwrap();
+    let response = account
+        .jmap_method_call(
+            "EmailSubmission/set",
+            serde_json::json!({
+                "accountId": account.id_string(),
+                "destroy": [cleanup_submission_id.clone()],
+                "onSuccessDestroyEmail": [cleanup_submission_id]
+            }),
+        )
+        .await;
+    assert_eq!(
+        response.0["methodResponses"][1][1]["destroyed"],
+        serde_json::json!([cleanup_email_id])
+    );
+    assert!(
+        client
+            .email_get(&cleanup_email_id, None::<Vec<_>>)
             .await
             .unwrap()
             .is_none()

@@ -62,6 +62,20 @@ pub trait EmailSubmissionSet: Sync + Send {
     > + Send;
 }
 
+// Both success actions must resolve through the successful submission's Email,
+// never through the submission collection's independent document number.
+fn success_email_id(
+    id: MaybeIdReference<Id>,
+    created: &HashMap<String, Id>,
+    existing: &HashMap<Id, Id>,
+) -> Option<Id> {
+    match id {
+        MaybeIdReference::Id(id) => existing.get(&id).copied(),
+        MaybeIdReference::Reference(id) => created.get(&id).copied(),
+        MaybeIdReference::Invalid(_) => None,
+    }
+}
+
 impl EmailSubmissionSet for Server {
     async fn email_submission_set<'x>(
         &self,
@@ -75,6 +89,9 @@ impl EmailSubmissionSet for Server {
 
         // Process creates
         let mut success_email_ids = HashMap::new();
+        // Existing submission IDs live in a different collection from Email IDs.
+        // Populate this map only after that specific update or destroy succeeds.
+        let mut success_existing_email_ids = HashMap::new();
         let mut batch = BatchBuilder::new();
         for (id, object) in request.unwrap_create() {
             match self
@@ -175,6 +192,10 @@ impl EmailSubmissionSet for Server {
                         // Update record
                         let mut new_submission = submission.inner.clone();
                         new_submission.undo_status = UndoStatus::Canceled;
+                        success_existing_email_ids.insert(
+                            id,
+                            Id::from_parts(new_submission.thread_id, new_submission.email_id),
+                        );
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::EmailSubmission)
@@ -226,18 +247,24 @@ impl EmailSubmissionSet for Server {
                 ))
                 .await?
             {
+                // Preserve the associated Email before removing the submission record;
+                // forwarding the submission's document number would mutate unrelated mail.
+                let current = submission
+                    .to_unarchived::<EmailSubmission>()
+                    .caused_by(trc::location!())?;
+                success_existing_email_ids.insert(
+                    id,
+                    Id::from_parts(
+                        current.inner.thread_id.into(),
+                        current.inner.email_id.into(),
+                    ),
+                );
                 // Update record
                 batch
                     .with_account_id(account_id)
                     .with_collection(Collection::EmailSubmission)
                     .with_document(document_id)
-                    .custom(
-                        ObjectIndexBuilder::<_, ()>::new().with_current(
-                            submission
-                                .to_unarchived::<EmailSubmission>()
-                                .caused_by(trc::location!())?,
-                        ),
-                    )
+                    .custom(ObjectIndexBuilder::<_, ()>::new().with_current(current))
                     .caused_by(trc::location!())?
                     .commit_point();
                 response.destroyed.push(id);
@@ -280,29 +307,25 @@ impl EmailSubmissionSet for Server {
                         update
                             .into_iter()
                             .filter_map(|(id, value)| {
-                                (
-                                    match id {
-                                        MaybeIdReference::Id(id) => MaybeInvalid::Value(id),
-                                        MaybeIdReference::Reference(id_ref) => {
-                                            MaybeInvalid::Value(*(success_email_ids.get(&id_ref)?))
-                                        }
-                                        MaybeIdReference::Invalid(id) => MaybeInvalid::Invalid(id),
-                                    },
-                                    value,
-                                )
-                                    .into()
+                                // A failed update has no mapping even when another submission changed.
+                                let email_id = success_email_id(
+                                    id,
+                                    &success_email_ids,
+                                    &success_existing_email_ids,
+                                )?;
+                                Some((MaybeInvalid::Value(email_id), value))
                             })
                             .collect()
                     }),
                     destroy: request.arguments.on_success_destroy_email.map(|ids| {
                         MaybeResultReference::Value(
                             ids.into_iter()
-                                .filter_map(|id| match id {
-                                    MaybeIdReference::Id(id) => Some(id),
-                                    MaybeIdReference::Reference(id_ref) => {
-                                        success_email_ids.get(&id_ref).copied()
-                                    }
-                                    MaybeIdReference::Invalid(_) => None,
+                                .filter_map(|id| {
+                                    success_email_id(
+                                        id,
+                                        &success_email_ids,
+                                        &success_existing_email_ids,
+                                    )
                                 })
                                 .map(MaybeInvalid::Value)
                                 .collect(),
@@ -830,5 +853,44 @@ fn rcpt_into_static(rcpt: RcptTo<Cow<'_, str>>) -> RcptTo<Cow<'static, str>> {
         orcpt: rcpt.orcpt.map(Cow::into_owned).map(Cow::Owned),
         rrvs: rcpt.rrvs,
         flags: rcpt.flags,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::success_email_id;
+    use jmap_proto::request::reference::MaybeIdReference;
+    use std::collections::HashMap;
+    use types::id::Id;
+
+    #[test]
+    fn success_actions_resolve_email_ids_and_skip_failed_submissions() {
+        // Separate collections can share document numbers; use a deliberately
+        // different Email identity so the old pass-through behavior cannot pass.
+        let submission_id = Id::from(1u32);
+        let email_id = Id::from_parts(17, 42);
+        let created = HashMap::from([("new".to_string(), email_id)]);
+        let existing = HashMap::from([(submission_id, email_id)]);
+        assert_eq!(
+            success_email_id(MaybeIdReference::Id(submission_id), &created, &existing),
+            Some(email_id)
+        );
+        assert_eq!(
+            success_email_id(
+                MaybeIdReference::Reference("new".into()),
+                &created,
+                &existing
+            ),
+            Some(email_id)
+        );
+        // One successful neighbor does not authorize hooks for a failed update,
+        // failed creation, nonexistent submission, or malformed identifier.
+        for id in [
+            MaybeIdReference::Id(Id::from(2u32)),
+            MaybeIdReference::Reference("failed".into()),
+            MaybeIdReference::Invalid("invalid".into()),
+        ] {
+            assert_eq!(success_email_id(id, &created, &existing), None);
+        }
     }
 }
