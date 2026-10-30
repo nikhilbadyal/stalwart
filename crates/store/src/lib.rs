@@ -809,3 +809,7 @@ impl Stores {
         // SPDX-SnippetEnd
     }
 }
+
+// Recovery barriers are shared by every node using the same PostgreSQL mail store.
+mod delivery_barrier;
+pub use delivery_barrier::MailDeliveryLease;

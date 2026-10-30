@@ -147,6 +147,8 @@ pub struct Data {
     pub queue_id_gen: SnowflakeIdGenerator,
     pub span_id_gen: SnowflakeIdGenerator,
     pub queue_status: AtomicBool,
+    // Recovery freezes SQL admission before waiting for existing delivery and dispatch work.
+    pub domain_release_barrier: tokio::sync::RwLock<()>,
 
     pub webadmin: WebAdminManager,
     pub logos: Mutex<AHashMap<String, Option<Resource<Vec<u8>>>>>,

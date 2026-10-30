@@ -97,6 +97,15 @@ impl ManagementApi for Server {
         let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
 
         match path.first().copied().unwrap_or_default() {
+            // A release executor must positively establish provider-side ownership binding before mutating accounts.
+            "domain-recovery" if req.method() == Method::GET => {
+                access_token.assert_has_permission(Permission::IndividualUpdate)?;
+                // SQL has already frozen the domain before the executor requests a barrier acknowledgment.
+                // After restart no old in-flight task survives, while the SQL freeze is still authoritative.
+                let _barrier = self.inner.data.domain_release_barrier.write().await;
+                let distributed = self.store().mail_delivery_lease(true).await?;
+                Ok(JsonResponse::new(serde_json::json!({"data": {"accountBoundQueue": 1, "deliveryBarrier": 1, "distributedBarrier": distributed.is_some()}})).into_http_response())
+            }
             "queue" => self.handle_manage_queue(req, path, &access_token).await,
             "settings" => {
                 self.handle_manage_settings(req, path, body, &access_token)

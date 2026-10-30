@@ -36,7 +36,11 @@ async fn queue_due() {
     let qr = &local.queue_receiver;
 
     let mut message = new_message(0);
-    message.message.recipients.push(build_rcpt("c", 3, 8, 9));
+    // Persist both ownership bindings and reload them through the durable spool, as happens after a restart.
+    message.message.sender_authorities = vec![(41, "old@example.org".into())];
+    let mut bound_recipient = build_rcpt("c", 3, 8, 9);
+    bound_recipient.account_id = Some(42);
+    message.message.recipients.push(bound_recipient);
     message.save_changes(&core, 0.into()).await;
 
     let mut message = new_message(1);
@@ -62,6 +66,14 @@ async fn queue_due() {
                 .await
             {
                 message.message.rcpt(domain);
+                if domain == "c" {
+                    // Address strings alone cannot safely identify either side after a domain changes accounts.
+                    assert_eq!(
+                        message.message.sender_authorities,
+                        vec![(41, "old@example.org".into())]
+                    );
+                    assert_eq!(message.message.rcpt(domain).account_id, Some(42));
+                }
                 message.remove(&core, queue_event.due.into()).await;
             } else {
                 panic!("Message not found");
@@ -168,6 +180,8 @@ pub fn new_message(queue_id: u64) -> MessageWrapper {
         queue_name: QueueName::default(),
         is_multi_queue: false,
         message: Message {
+            // Queue-manager fixtures do not represent authenticated customer submissions.
+            sender_authorities: Vec::new(),
             size: 0,
             created: now(),
             return_path: "sender@foobar.org".into(),

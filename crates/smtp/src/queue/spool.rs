@@ -82,6 +82,8 @@ impl SmtpSpool for Server {
             is_multi_queue: false,
             span_id,
             message: Message {
+                // System-generated messages have no authenticated sender binding.
+                sender_authorities: Vec::new(),
                 created,
                 return_path: return_path.to_lowercase_domain().into_boxed_str(),
                 recipients: Vec::with_capacity(1),
@@ -301,6 +303,20 @@ impl MessageWrapper {
         server: &Server,
         source: MessageSource,
     ) -> bool {
+        // Capture recipient ownership before the durable queue write; lookup failure cannot authorize delivery.
+        for recipient in &mut self.message.recipients {
+            match server
+                .email_to_id(server.directory(), &recipient.address, session_id)
+                .await
+            {
+                Ok(account_id) => recipient.account_id = account_id,
+                Err(error) => {
+                    trc::error!(error);
+                    return false;
+                }
+            }
+        }
+
         // Set flags
         let (flags, event, train_spam) = match source {
             MessageSource::Authenticated => (

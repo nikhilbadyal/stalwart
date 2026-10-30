@@ -57,12 +57,16 @@ async fn generate_dsn() {
         is_multi_queue: false,
         queue_name: QueueName::default(),
         message: Message {
+            // DSN fixtures have no authenticated customer sender authority.
+            sender_authorities: Vec::new(),
             size,
             created: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
             return_path: "sender@foobar.org".into(),
             recipients: vec![Recipient {
+                // Legacy/test records must not gain a new local recipient by address lookup.
+                account_id: None,
                 address: "foobar@example.org".into(),
                 status: Status::PermanentFailure(ErrorDetails {
                     entity: "mx.example.org".into(),
@@ -119,6 +123,8 @@ async fn generate_dsn() {
 
     // Success DSN
     message.message.recipients.push(Recipient {
+        // Legacy/test records must not gain a new local recipient by address lookup.
+        account_id: None,
         address: "jane@example.org".into(),
         status: Status::Completed(HostResponse {
             hostname: "mx2.example.org".into(),
@@ -141,6 +147,8 @@ async fn generate_dsn() {
 
     // Delay DSN
     message.message.recipients.push(Recipient {
+        // Legacy/test records must not gain a new local recipient by address lookup.
+        account_id: None,
         address: "john.doe@example.org".into(),
         status: Status::TemporaryFailure(ErrorDetails {
             entity: "mx.domain.org".into(),

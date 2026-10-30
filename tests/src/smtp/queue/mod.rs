@@ -23,6 +23,8 @@ pub mod virtualq;
 
 pub fn build_rcpt(address: &str, retry: u64, notify: u64, expires: u64) -> Recipient {
     Recipient {
+        // Test fixtures bind local accounts explicitly when ownership matters.
+        account_id: None,
         address: address.into(),
         retry: Schedule::later(retry),
         notify: Schedule::later(notify),

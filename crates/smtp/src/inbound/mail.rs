@@ -229,6 +229,33 @@ impl<T: SessionStream> Session<T> {
             }
         }
 
+        // Re-read SQL authority even on an already authenticated connection or admin-mediated JMAP send.
+        if let Some(token) = &self.data.authenticated_as {
+            let address = self.data.mail_from.as_ref().unwrap().address_lcase.as_str();
+            match crate::queue::authority::sender_is_authorized(
+                &self.server,
+                token.primary_id(),
+                address,
+            )
+            .await
+            {
+                Ok(true) => (),
+                Ok(false) => {
+                    self.data.mail_from = None;
+                    return self
+                        .write(b"550 5.7.1 Sender authority has been revoked.\r\n")
+                        .await;
+                }
+                Err(error) => {
+                    trc::error!(error);
+                    self.data.mail_from = None;
+                    return self
+                        .write(b"451 4.7.1 Sender authority lookup unavailable.\r\n")
+                        .await;
+                }
+            }
+        }
+
         // Make sure that the authenticated user is allowed to send from this address
         match self.authenticated_as() {
             Some(authenticated_as)

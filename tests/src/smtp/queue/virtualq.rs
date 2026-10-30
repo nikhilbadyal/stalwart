@@ -77,7 +77,8 @@ async fn virtual_queue() {
     // Start test server
     let remote = TestSMTP::new("smtp_virtual_queue_remote", REMOTE).await;
     let _rx = remote.start(&[ServerProtocol::Smtp]).await;
-    let local = TestSMTP::with_database("smtp_virtual_queue_local", LOCAL, "mysql").await;
+    // Keep virtual-queue coverage available in the lightweight SQLite recovery regression build.
+    let local = TestSMTP::new("smtp_virtual_queue_local", LOCAL).await;
 
     // Validate parsing
     for value in ["a", "ab", "abcdefgh"] {

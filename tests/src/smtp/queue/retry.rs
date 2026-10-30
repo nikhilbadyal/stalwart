@@ -151,7 +151,11 @@ async fn queue_retry() {
         }
     }
     qr.assert_queue_is_empty().await;
-    assert_eq!(retries, vec![1, 2, 3]);
+    // Observing after crossing a Unix-second boundary can consume one second of the scheduled delay.
+    assert_eq!(retries.len(), 3);
+    assert!(retries.iter().zip([1, 2, 3]).all(|(actual, scheduled)| {
+        *actual <= scheduled && scheduled - *actual <= 1
+    }));
     assert_eq!(dsn.len(), 4);
     let mut dsn = dsn.into_iter();
 

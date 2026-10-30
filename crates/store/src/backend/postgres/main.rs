@@ -47,29 +47,42 @@ impl PostgresStore {
         if let Some(max_conn) = config.property::<usize>((&prefix, "pool.max-connections")) {
             cfg.pool = PoolConfig::new(max_conn).into();
         }
-        let mut db = Self {
-            conn_pool: if config
-                .property_or_default::<bool>((&prefix, "tls.enable"), "false")
-                .unwrap_or_default()
-            {
+        let tls_enabled = config
+            .property_or_default::<bool>((&prefix, "tls.enable"), "false")
+            .unwrap_or_default();
+        let allow_invalid = config
+            .property_or_default((&prefix, "tls.allow-invalid-certs"), "false")
+            .unwrap_or_default();
+        // Both pools use exactly the same database and TLS policy; leases never hold a data-query connection.
+        let new_pool = || {
+            if tls_enabled {
                 cfg.create_pool(
                     Some(Runtime::Tokio1),
-                    MakeRustlsConnect::new(rustls_client_config(
-                        config
-                            .property_or_default((&prefix, "tls.allow-invalid-certs"), "false")
-                            .unwrap_or_default(),
-                    )),
+                    MakeRustlsConnect::new(rustls_client_config(allow_invalid)),
                 )
             } else {
                 cfg.create_pool(Some(Runtime::Tokio1), NoTls)
             }
+        };
+        let conn_pool = new_pool()
             .map_err(|e| {
                 config.new_build_error(
                     prefix.as_str(),
                     format!("Failed to create connection pool: {e}"),
                 )
             })
-            .ok()?,
+            .ok()?;
+        let barrier_pool = new_pool()
+            .map_err(|e| {
+                config.new_build_error(
+                    prefix.as_str(),
+                    format!("Failed to create barrier pool: {e}"),
+                )
+            })
+            .ok()?;
+        let mut db = Self {
+            conn_pool,
+            barrier_pool,
             languages: config
                 .properties::<Language>((&prefix, "languages"))
                 .into_iter()

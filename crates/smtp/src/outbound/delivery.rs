@@ -147,6 +147,48 @@ impl QueuedMessage {
     }
 
     async fn deliver_task(self, server: Server, mut message: MessageWrapper) -> QueueEventStatus {
+        // Hold through external handoff and local Sieve processing, not merely the authorization lookup.
+        let inner = server.inner.clone();
+        let _release_guard = inner.data.domain_release_barrier.read().await;
+        // All nodes share the PostgreSQL barrier while the local guard retains consistent lock ordering.
+        let _distributed_release_guard = match server.store().mail_delivery_lease(false).await {
+            Ok(lease) => lease,
+            Err(error) => {
+                trc::error!(error);
+                for recipient in &mut message.message.recipients {
+                    recipient.retry.due = now() + 60;
+                }
+                message.save_changes(&server, self.due.into()).await;
+                return QueueEventStatus::Deferred;
+            }
+        };
+
+        // Accepted mail may outlive a domain release; revalidate its original account before dispatch.
+        for (account_id, authority_address) in &message.message.sender_authorities {
+            match crate::queue::authority::sender_is_authorized(
+                &server,
+                *account_id,
+                authority_address,
+            )
+            .await
+            {
+                Ok(true) => (),
+                Ok(false) => {
+                    // Do not send a DSN with historical recipients to an address now owned by another customer.
+                    message.remove(&server, self.due.into()).await;
+                    return QueueEventStatus::Completed;
+                }
+                Err(error) => {
+                    trc::error!(error);
+                    for recipient in &mut message.message.recipients {
+                        recipient.retry.due = now() + 60;
+                    }
+                    message.save_changes(&server, self.due.into()).await;
+                    return QueueEventStatus::Deferred;
+                }
+            }
+        }
+
         // Check that the message still has recipients to be delivered
         let has_pending_delivery = message.has_pending_delivery();
         let span_id = message.span_id;

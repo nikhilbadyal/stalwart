@@ -274,6 +274,8 @@ where
     fn from(message: LegacyMessage<SIZE, IDX>) -> Self {
         let domains = message.domains;
         Message {
+            // System-generated messages have no authenticated sender binding.
+            sender_authorities: Vec::new(),
             created: message.created,
             blob_hash: message.blob_hash,
             return_path: message.return_path_lcase.into_boxed_str(),

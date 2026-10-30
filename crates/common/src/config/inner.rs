@@ -67,6 +67,8 @@ impl Data {
             queue_id_gen: id_generator.clone(),
             span_id_gen: id_generator,
             queue_status: true.into(),
+            // Readers span provider delivery; an operator cutover waits for every prior reader.
+            domain_release_barrier: tokio::sync::RwLock::new(()),
             webadmin: config
                 .value("webadmin.path")
                 .map(|path| WebAdminManager::new(path.into()))
@@ -228,6 +230,8 @@ impl Default for Data {
             queue_id_gen: Default::default(),
             span_id_gen: Default::default(),
             queue_status: true.into(),
+            // Readers span provider delivery; an operator cutover waits for every prior reader.
+            domain_release_barrier: tokio::sync::RwLock::new(()),
             webadmin: Default::default(),
             logos: Default::default(),
             smtp_connectors: Default::default(),

@@ -175,18 +175,26 @@ impl FormHandler for Server {
                 .await
                 .caused_by(trc::location!())?;
 
+            // Form ingestion also participates in cutover; its Sieve side effects must finish before acknowledgment.
+            let _release_guard = self.inner.data.domain_release_barrier.read().await;
+            let _distributed_release_guard = self.store().mail_delivery_lease(false).await?;
+            // Bind form recipients to their current account just like SMTP queue acceptance.
+            let mut bound_recipients = Vec::new();
+            for address in &form.rcpt_to {
+                bound_recipients.push(IngestRecipient {
+                    account_id: self
+                        .email_to_id(self.directory(), address, session.session_id)
+                        .await?,
+                    address: address.clone(),
+                    is_spam: false,
+                });
+            }
+
             for result in self
                 .deliver_message(IngestMessage {
                     sender_address: from_email,
                     sender_authenticated: false,
-                    recipients: form
-                        .rcpt_to
-                        .iter()
-                        .map(|address| IngestRecipient {
-                            address: address.clone(),
-                            is_spam: false,
-                        })
-                        .collect(),
+                    recipients: bound_recipients,
                     message_blob,
                     message_size: message.len() as u64,
                     session_id: session.session_id,

@@ -65,6 +65,26 @@ impl<T: SessionStream> Session<T> {
             }
         };
 
+        let mut header_authorities = Vec::new();
+        // Cached identities cannot authorize a released From/Sender header using a different valid envelope.
+        if let Some(token) = &self.data.authenticated_as {
+            for header in [parsed_message.from(), parsed_message.sender()]
+                .into_iter()
+                .flatten()
+            {
+                for author in header.iter().filter_map(|author| author.address.as_deref()) {
+                    match crate::queue::authority::sender_is_authorized(&self.server, token.primary_id(), author).await {
+                        Ok(true) => header_authorities.push((token.primary_id(), author.to_ascii_lowercase().into_boxed_str())),
+                        Ok(false) => return (&b"550 5.7.1 Message author authority has been revoked.\r\n"[..]).into(),
+                        Err(error) => {
+                            trc::error!(error);
+                            return (&b"451 4.7.1 Message author lookup unavailable.\r\n"[..]).into();
+                        }
+                    }
+                }
+            }
+        }
+
         // Authenticate message
         let auth_message = AuthenticatedMessage::from_parsed(
             &parsed_message,
@@ -608,6 +628,11 @@ impl<T: SessionStream> Session<T> {
         let mut message = self
             .build_message(mail_from, rcpt_to, message_id, self.data.session_id)
             .await;
+        // Envelope authorization alone cannot revoke a previously queued alias author using a primary envelope.
+        message
+            .message
+            .sender_authorities
+            .extend(header_authorities);
 
         // Add Return-Path
         if self
@@ -734,6 +759,20 @@ impl<T: SessionStream> Session<T> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let mut message = Message {
+            // JMAP also enters through this SMTP path using the target account token.
+            sender_authorities: self
+                .data
+                .authenticated_as
+                .as_ref()
+                .filter(|_| !mail_from.address.is_empty())
+                .map(|token| {
+                    (
+                        token.primary_id(),
+                        mail_from.address.to_lowercase_domain().into_boxed_str(),
+                    )
+                })
+                .into_iter()
+                .collect(),
             created,
             return_path: mail_from.address.to_lowercase_domain().into_boxed_str(),
             recipients: Vec::with_capacity(rcpt_to.len()),

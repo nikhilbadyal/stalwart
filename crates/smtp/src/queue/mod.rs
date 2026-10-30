@@ -19,6 +19,7 @@ use store::write::now;
 use types::blob_hash::BlobHash;
 use utils::DomainPart;
 
+pub mod authority;
 pub mod dsn;
 pub mod manager;
 pub mod quota;
@@ -54,6 +55,8 @@ pub enum MessageSource {
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq, Eq)]
 pub struct Message {
+    // Preserve submitting authority across retries; never infer it from a reassigned address.
+    pub sender_authorities: Vec<(u32, Box<str>)>,
     pub created: u64,
     pub blob_hash: BlobHash,
 
@@ -106,6 +109,8 @@ pub enum QuotaKey {
     serde::Deserialize,
 )]
 pub struct Recipient {
+    // A queued local delivery may never resolve into a different customer account.
+    pub account_id: Option<u32>,
     pub address: Box<str>,
 
     pub retry: Schedule<u32>,
@@ -407,6 +412,7 @@ pub fn instant_to_timestamp(now: Instant, time: Instant) -> u64 {
 impl Recipient {
     pub fn new(address: impl AsRef<str>) -> Self {
         Recipient {
+            account_id: None,
             address: address.to_lowercase_domain().into_boxed_str(),
             status: Status::Scheduled,
             flags: 0,

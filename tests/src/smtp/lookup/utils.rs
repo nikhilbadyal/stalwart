@@ -142,12 +142,16 @@ async fn strategies() {
 
     // Test strategy resolution
     let message = Message {
+        // System-generated messages have no authenticated sender binding.
+        sender_authorities: Vec::new(),
         created: now() - 123,
         blob_hash: Default::default(),
         received_from_ip: "1.2.3.4".parse().unwrap(),
         received_via_port: 7911,
         return_path: "test@example.com".into(),
         recipients: vec![Recipient {
+            // Legacy/test records must not gain a new local recipient by address lookup.
+            account_id: None,
             address: "recipient@foobar.com".into(),
             retry: Schedule::now(),
             notify: Schedule::now(),

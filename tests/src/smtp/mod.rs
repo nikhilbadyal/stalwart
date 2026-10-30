@@ -141,10 +141,21 @@ data = "{STORE}"
 fts = "{STORE}"
 blob = "{STORE}"
 lookup = "{STORE}"
+# Queue admission now resolves account ownership, so relay fixtures need a real empty directory too.
+directory = "queue-test"
+
+[directory."queue-test"]
+type = "internal"
+store = "{STORE}"
 
 [store."rocksdb"]
 type = "rocksdb"
 path = "{TMP}/queue.db"
+
+# The queue suite also runs in the lightweight SQLite build used by recovery regression checks.
+[store."sqlite"]
+type = "sqlite"
+path = "{TMP}/queue.sqlite"
 
 #[store."foundationdb"]
 #type = "foundationdb"
@@ -217,7 +228,17 @@ impl TestSMTP {
     }
 
     pub async fn new(name: &str, config: impl AsRef<str>) -> TestSMTP {
-        Self::with_database(name, config, "rocksdb").await
+        // Honor the compiled backend matrix instead of silently constructing an unavailable RocksDB store.
+        Self::with_database(
+            name,
+            config,
+            if cfg!(feature = "rocks") {
+                "rocksdb"
+            } else {
+                "sqlite"
+            },
+        )
+        .await
     }
 
     pub async fn with_database(

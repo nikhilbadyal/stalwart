@@ -25,6 +25,8 @@ pub mod write;
 
 pub struct PostgresStore {
     pub(crate) conn_pool: Pool,
+    // Barrier connections are held across transport IO and cannot share the data-query pool.
+    pub(crate) barrier_pool: Pool,
     pub(crate) languages: AHashSet<Language>,
 }
 

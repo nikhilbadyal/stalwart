@@ -627,6 +627,8 @@ pub async fn test(params: &JMAPTest) {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
                 recipients: vec![IngestRecipient {
+                    // Direct ingestion tests bind the existing recipient account at acceptance.
+                    account_id: Some(tenant_user_id),
                     address: "john@foobar.org".to_string(),
                     is_spam: false
                 }],
@@ -669,6 +671,8 @@ pub async fn test(params: &JMAPTest) {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
                 recipients: vec![IngestRecipient {
+                    // Direct ingestion tests bind the existing recipient account at acceptance.
+                    account_id: Some(tenant_user_id),
                     address: "john@foobar.org".to_string(),
                     is_spam: false
                 }],
@@ -699,6 +703,8 @@ pub async fn test(params: &JMAPTest) {
                 sender_address: "bill@foobar.org".to_string(),
                 sender_authenticated: true,
                 recipients: vec![IngestRecipient {
+                    // Direct ingestion tests bind the existing recipient account at acceptance.
+                    account_id: Some(tenant_user_id),
                     address: "john@foobar.org".to_string(),
                     is_spam: false
                 }],

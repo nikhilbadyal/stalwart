@@ -219,6 +219,8 @@ pub(crate) async fn migrate_queue_v014(server: &Server) -> trc::Result<()> {
 impl From<LegacyMessage> for Message {
     fn from(legacy: LegacyMessage) -> Self {
         Message {
+            // System-generated messages have no authenticated sender binding.
+            sender_authorities: Vec::new(),
             created: legacy.created,
             blob_hash: legacy.blob_hash,
 
@@ -241,6 +243,8 @@ impl From<LegacyMessage> for Message {
 impl From<LegacyRecipient> for Recipient {
     fn from(legacy: LegacyRecipient) -> Self {
         Recipient {
+            // Legacy/test records must not gain a new local recipient by address lookup.
+            account_id: None,
             address: legacy.address.into_boxed_str(),
             retry: legacy.retry,
             notify: legacy.notify,
