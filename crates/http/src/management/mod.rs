@@ -105,7 +105,7 @@ impl ManagementApi for Server {
                 let _barrier = self.inner.data.domain_release_barrier.write().await;
                 let distributed = self.store().mail_delivery_lease(true).await?;
                 // A cached capability response must never substitute for waiting on this request's delivery barrier.
-                Ok(JsonResponse::new(serde_json::json!({"data": {"accountBoundQueue": 1, "deliveryBarrier": 1, "distributedBarrier": distributed.is_some()}})).no_cache().into_http_response())
+                Ok(JsonResponse::new(serde_json::json!({"data": {"accountBoundQueue": 2, "deliveryBarrier": 1, "distributedBarrier": distributed.is_some()}})).no_cache().into_http_response())
             }
             "queue" => self.handle_manage_queue(req, path, &access_token).await,
             "settings" => {

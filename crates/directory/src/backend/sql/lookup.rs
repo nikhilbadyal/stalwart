@@ -21,6 +21,28 @@ use store::{NamedRows, Rows, Value};
 use trc::AddContext;
 
 impl SqlDirectory {
+    /// Sending authority comes from current SQL rows, never aliases retained by internal principal synchronization.
+    pub async fn is_sender_authorized(&self, account_id: u32, address: &str) -> trc::Result<bool> {
+        let Some(principal) = self
+            .data_store
+            .query(QueryParams::id(account_id).with_return_member_of(false))
+            .await?
+        else {
+            return Ok(false);
+        };
+        if self.mappings.query_emails.is_empty() {
+            // A SQL installation without an explicit sender inventory cannot prove live address authority.
+            return Ok(false);
+        }
+        let rows = self
+            .sql_store
+            .sql_query::<Rows>(&self.mappings.query_emails, vec![principal.name().into()])
+            .await?;
+        Ok(rows.rows.iter().flat_map(|row| &row.values).any(
+            |value| matches!(value, Value::Text(email) if email.eq_ignore_ascii_case(address)),
+        ))
+    }
+
     pub async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
         let (external_principal, stored_principal) = match by.by {
             QueryBy::Name(username) => (

@@ -12,6 +12,21 @@ use crate::{
 };
 
 impl Directory {
+    /// SQL sender policy must bypass its intentionally retained provisioning aliases and directory caches.
+    pub async fn is_sender_authorized(&self, account_id: u32, address: &str) -> trc::Result<bool> {
+        match &self.store {
+            DirectoryInner::Sql(store) => store.is_sender_authorized(account_id, address).await,
+            _ => Ok(self
+                .query(QueryParams::id(account_id).with_return_member_of(false))
+                .await?
+                .is_some_and(|principal| {
+                    principal
+                        .email_addresses()
+                        .any(|email| email.eq_ignore_ascii_case(address))
+                })),
+        }
+    }
+
     pub async fn query(&self, by: QueryParams<'_>) -> trc::Result<Option<Principal>> {
         match &self.store {
             DirectoryInner::Internal(store) => store.query(by).await,
